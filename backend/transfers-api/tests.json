@@ -1,0 +1,19 @@
+{
+  "tests": [
+    {
+      "name": "Lookup existing user",
+      "method": "GET",
+      "path": "/?action=lookup&phone=%2B79991234568",
+      "expectedStatus": 200,
+      "bodyMatcher": "none"
+    },
+    {
+      "name": "Send transfer",
+      "method": "POST",
+      "path": "/",
+      "body": {"from_phone": "+79991234567", "to_phone": "+79991234568", "amount": 50, "comment": "Test"},
+      "expectedStatus": 200,
+      "bodyMatcher": "none"
+    }
+  ]
+}

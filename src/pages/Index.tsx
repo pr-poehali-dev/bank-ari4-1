@@ -211,49 +211,147 @@ function AccountsSection() {
   );
 }
 
+const TRANSFERS_API = "https://functions.poehali.dev/ebbc2942-afe4-4283-88b2-1d52ac8a4ea4";
+const MY_PHONE = "+79991234567";
+const AVATAR_COLORS = ["#9b5fe0", "#f72585", "#4cc9f0", "#06d6a0", "#ff6b35"];
+function getInitials(name: string) {
+  return name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+}
+function normalizePhone(p: string) {
+  const digits = p.replace(/\D/g, "");
+  if (digits.length === 11 && (digits[0] === "7" || digits[0] === "8")) return "+7" + digits.slice(1);
+  if (digits.length === 10) return "+7" + digits;
+  return "+" + digits;
+}
+
 function TransfersSection() {
   const [amount, setAmount] = useState("");
   const [phone, setPhone] = useState("");
-  const recent = [
-    { name: "Алексей П.", phone: "+7 999 123-45-67", avatar: "АП", color: "#9b5fe0" },
-    { name: "Мария С.", phone: "+7 926 987-65-43", avatar: "МС", color: "#f72585" },
-    { name: "Дмитрий К.", phone: "+7 916 555-44-33", avatar: "ДК", color: "#4cc9f0" },
-    { name: "Катя В.", phone: "+7 903 111-22-33", avatar: "КВ", color: "#06d6a0" },
+  const [comment, setComment] = useState("");
+  const [recipient, setRecipient] = useState<{ name: string; phone: string } | null>(null);
+  const [lookupStatus, setLookupStatus] = useState<"idle" | "loading" | "found" | "notfound">("idle");
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const recentContacts = [
+    { name: "Алексей Петров", phone: "+79991234568", color: "#9b5fe0" },
+    { name: "Мария Соколова", phone: "+79269876543", color: "#f72585" },
+    { name: "Дмитрий Козлов", phone: "+79165554433", color: "#4cc9f0" },
+    { name: "Катя Василенко", phone: "+79031112233", color: "#06d6a0" },
   ];
+
+  const lookup = async (raw: string) => {
+    const normalized = normalizePhone(raw);
+    if (normalized.replace(/\D/g, "").length < 11) { setRecipient(null); setLookupStatus("idle"); return; }
+    setLookupStatus("loading");
+    try {
+      const res = await fetch(`${TRANSFERS_API}?action=lookup&phone=${encodeURIComponent(normalized)}`);
+      const data = await res.json();
+      if (res.ok && data.user) { setRecipient(data.user); setLookupStatus("found"); }
+      else { setRecipient(null); setLookupStatus("notfound"); }
+    } catch { setRecipient(null); setLookupStatus("notfound"); }
+  };
+
+  const handlePhoneChange = (val: string) => {
+    setPhone(val); setResult(null);
+    if (val.replace(/\D/g, "").length >= 10) lookup(val);
+    else { setRecipient(null); setLookupStatus("idle"); }
+  };
+
+  const selectContact = (c: { name: string; phone: string }) => {
+    setPhone(c.phone); setRecipient(c); setLookupStatus("found"); setResult(null);
+  };
+
+  const handleSend = async () => {
+    if (!recipient || !amount || Number(amount) <= 0) return;
+    setSending(true); setResult(null);
+    try {
+      const res = await fetch(TRANSFERS_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from_phone: MY_PHONE, to_phone: recipient.phone, amount: Number(amount), comment }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setResult({ ok: true, message: `Перевод ${Number(amount).toLocaleString("ru-RU")} ₽ → ${recipient.name} выполнен!` });
+        setPhone(""); setAmount(""); setComment(""); setRecipient(null); setLookupStatus("idle");
+      } else {
+        setResult({ ok: false, message: data.error || "Ошибка перевода" });
+      }
+    } catch { setResult({ ok: false, message: "Ошибка соединения" }); }
+    finally { setSending(false); }
+  };
+
   return (
     <div className="space-y-6 max-w-2xl">
+      {result && (
+        <div className={`rounded-2xl p-4 flex items-center gap-3 animate-fade-in ${result.ok ? "bg-[#06d6a0]/15 border border-[#06d6a0]/30" : "bg-[#f72585]/15 border border-[#f72585]/30"}`}>
+          <Icon name={result.ok ? "CheckCircle" : "AlertCircle"} size={20} style={{ color: result.ok ? "#06d6a0" : "#f72585" }} />
+          <span className="text-white text-sm font-medium">{result.message}</span>
+        </div>
+      )}
       <div className="glass rounded-2xl p-6 space-y-4">
         <h2 className="font-montserrat font-bold text-white">Перевод по номеру телефона</h2>
         <div>
           <label className="text-white/60 text-sm mb-2 block">Номер телефона получателя</label>
-          <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+7 000 000-00-00"
-            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-[#9b5fe0] transition-colors" />
+          <div className="relative">
+            <input value={phone} onChange={e => handlePhoneChange(e.target.value)} placeholder="+7 900 000-00-00"
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 pr-10 text-white placeholder-white/30 focus:outline-none focus:border-[#9b5fe0] transition-colors" />
+            <div className="absolute right-3 top-1/2 -translate-y-1/2">
+              {lookupStatus === "loading" && <Icon name="Loader" size={18} className="text-white/40 animate-spin" />}
+              {lookupStatus === "found" && <Icon name="CheckCircle" size={18} style={{ color: "#06d6a0" }} />}
+              {lookupStatus === "notfound" && <Icon name="XCircle" size={18} style={{ color: "#f72585" }} />}
+            </div>
+          </div>
+          {lookupStatus === "found" && recipient && (
+            <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-xl bg-[#06d6a0]/10 border border-[#06d6a0]/20 animate-fade-in">
+              <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold"
+                style={{ background: AVATAR_COLORS[recipient.name.charCodeAt(0) % AVATAR_COLORS.length] + "90" }}>
+                {getInitials(recipient.name)}
+              </div>
+              <span className="text-[#06d6a0] text-sm font-medium">{recipient.name}</span>
+            </div>
+          )}
+          {lookupStatus === "notfound" && (
+            <p className="mt-2 text-[#f72585] text-xs px-1 animate-fade-in">Пользователь с таким номером не найден в АРИ4</p>
+          )}
         </div>
         <div>
           <label className="text-white/60 text-sm mb-2 block">Сумма перевода</label>
           <div className="relative">
-            <input value={amount} onChange={e => setAmount(e.target.value)} placeholder="0"
+            <input value={amount} onChange={e => setAmount(e.target.value.replace(/\D/g, ""))} placeholder="0"
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 pr-12 text-white placeholder-white/30 focus:outline-none focus:border-[#9b5fe0] transition-colors font-montserrat font-bold text-2xl" />
             <span className="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 text-xl">₽</span>
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
           {[500, 1000, 2000, 5000].map(v => (
-            <button key={v} onClick={() => setAmount(String(v))} className="glass rounded-full px-4 py-1.5 text-white/70 text-sm hover:text-white transition-all">
+            <button key={v} onClick={() => setAmount(String(v))}
+              className={`glass rounded-full px-4 py-1.5 text-sm transition-all ${amount === String(v) ? "border-[#9b5fe0]/60 text-white" : "text-white/70 hover:text-white"}`}>
               {v.toLocaleString()} ₽
             </button>
           ))}
         </div>
-        <button className="w-full rounded-xl py-4 font-montserrat font-bold text-white gradient-card-purple hover:opacity-90 transition-opacity neon-purple">
-          Перевести
+        <div>
+          <label className="text-white/60 text-sm mb-2 block">Комментарий (необязательно)</label>
+          <input value={comment} onChange={e => setComment(e.target.value)} placeholder="За ужин, долг и т.д."
+            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-[#9b5fe0] transition-colors text-sm" />
+        </div>
+        <button onClick={handleSend} disabled={!recipient || !amount || Number(amount) <= 0 || sending}
+          className="w-full rounded-xl py-4 font-montserrat font-bold text-white gradient-card-purple hover:opacity-90 transition-opacity neon-purple disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+          {sending
+            ? <><Icon name="Loader" size={18} className="animate-spin" /> Отправка...</>
+            : <><Icon name="Send" size={18} /> Перевести {amount ? `${Number(amount).toLocaleString("ru-RU")} ₽` : ""}</>}
         </button>
       </div>
       <div>
-        <h3 className="font-montserrat font-bold text-white mb-3">Недавние получатели</h3>
+        <h3 className="font-montserrat font-bold text-white mb-3">Быстрый выбор</h3>
         <div className="grid grid-cols-2 gap-3">
-          {recent.map((r) => (
-            <button key={r.name} className="glass rounded-2xl p-4 flex items-center gap-3 card-hover text-left">
-              <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0" style={{ background: r.color + "50" }}>{r.avatar}</div>
+          {recentContacts.map((r) => (
+            <button key={r.name} onClick={() => selectContact(r)} className="glass rounded-2xl p-4 flex items-center gap-3 card-hover text-left">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0" style={{ background: r.color + "50" }}>
+                {getInitials(r.name)}
+              </div>
               <div>
                 <div className="text-white font-medium text-sm">{r.name}</div>
                 <div className="text-white/50 text-xs">{r.phone}</div>
